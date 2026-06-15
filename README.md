@@ -82,8 +82,7 @@ cd services/voiceprint; ./run.ps1
 
 生产服务器用 [docker-compose.prod.yml](docker-compose.prod.yml)（直接拉镜像，不本地构建）：
 ```bash
-cp .env.example .env          # 填火山/豆包 key
-export IMAGE_OWNER=skadli      # 你的 GitHub 用户名(小写)
+cp .env.example .env          # 只需填 3 个 key（镜像地址等已写死在 compose 里）
 docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d
 # GHCR 包默认私有：先 docker login ghcr.io（用户名 + 一个有 read:packages 的 PAT），或在仓库把 3 个包设为 Public
 ```
