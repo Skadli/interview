@@ -32,7 +32,7 @@ func makeASRFactory(cfg Config) ASRFactory {
 
 func makeLLM(cfg Config) LLM {
 	if cfg.LLMProvider == "ark" {
-		return NewArkLLM(cfg.ArkBaseURL, cfg.ArkAPIKey)
+		return NewArkLLM(cfg.ArkBaseURL, cfg.ArkAPIKey, cfg.ArkContextCache)
 	}
 	return MockLLM{}
 }

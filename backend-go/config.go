@@ -21,10 +21,11 @@ type Config struct {
 	VolcASRURL     string
 
 	// 火山方舟（豆包 1.6）
-	ArkAPIKey   string
-	ArkBaseURL  string
-	ModelFast   string // 口语化：极速
-	ModelStrong string // 结构化：重质量
+	ArkAPIKey       string
+	ArkBaseURL      string
+	ModelFast       string // 口语化：极速
+	ModelStrong     string // 结构化：重质量
+	ArkContextCache bool   // 上下文缓存（需推理接入点 ep-xxx；失败自动回退）
 
 	// 声纹 sidecar（Python）；为空则不分离（全部视为面试官）
 	SpeakerSidecarURL string
@@ -59,6 +60,13 @@ func envI(k string, d int) int {
 	}
 	return d
 }
+func envB(k string, d bool) bool {
+	v := os.Getenv(k)
+	if v == "" {
+		return d
+	}
+	return v == "1" || v == "true" || v == "TRUE" || v == "on" || v == "yes"
+}
 
 func loadConfig() Config {
 	return Config{
@@ -76,8 +84,9 @@ func loadConfig() Config {
 
 		ArkAPIKey:   os.Getenv("ARK_API_KEY"),
 		ArkBaseURL:  env("ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),
-		ModelFast:   env("MODEL_FAST", "doubao-seed-2-0-mini-260428"),
-		ModelStrong: env("MODEL_STRONG", "doubao-seed-2-0-mini-260428"),
+		ModelFast:       env("MODEL_FAST", "doubao-seed-2-0-mini-260428"),
+		ModelStrong:     env("MODEL_STRONG", "doubao-seed-2-0-mini-260428"),
+		ArkContextCache: envB("ARK_CONTEXT_CACHE", false),
 
 		SpeakerSidecarURL: os.Getenv("SPEAKER_SIDECAR_URL"),
 		SpeakerThresh:     envF("SPEAKER_THRESH", 0.75),

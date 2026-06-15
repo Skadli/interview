@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -53,25 +55,33 @@ func (MockLLM) Stream(ctx context.Context, model, system, user string, onDelta f
 // ====================== Ark（豆包，OpenAI 兼容） ======================
 
 type ArkLLM struct {
-	baseURL string
-	apiKey  string
-	cli     *http.Client
+	baseURL    string
+	apiKey     string
+	cli        *http.Client
+	useContext bool // 启用上下文缓存（需用推理接入点 ep-xxx，否则自动回退普通模式）
+
+	mu    sync.Mutex
+	ctxID map[string]ctxEntry // key = model + "\x00" + system  ->  context_id
 }
 
-func NewArkLLM(baseURL, apiKey string) *ArkLLM {
+type ctxEntry struct {
+	id string
+	at time.Time
+}
+
+// 本地缓存有效期（略小于服务端 ttl=3600s，过期后重建）
+const ctxLocalTTL = 50 * time.Minute
+
+func NewArkLLM(baseURL, apiKey string, useContext bool) *ArkLLM {
 	return &ArkLLM{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  apiKey,
-		cli:     &http.Client{Timeout: 60 * time.Second},
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		apiKey:     apiKey,
+		cli:        &http.Client{Timeout: 60 * time.Second},
+		useContext: useContext,
+		ctxID:      map[string]ctxEntry{},
 	}
 }
 
-type arkReq struct {
-	Model    string       `json:"model"`
-	Messages []arkMessage `json:"messages"`
-	Stream   bool         `json:"stream"`
-	Thinking arkThinking  `json:"thinking"`
-}
 type arkMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -89,18 +99,101 @@ type arkStreamChunk struct {
 }
 
 func (a *ArkLLM) Stream(ctx context.Context, model, system, user string, onDelta func(string)) error {
-	body := arkReq{
-		Model: model,
-		Messages: []arkMessage{
+	// 上下文缓存：把固定前缀(system，含简历/公司)缓存为 context，每个问题只发增量，压低首字延迟。
+	// 需要用推理接入点(ep-xxx)；任何失败都自动回退普通模式，保证可用。
+	if a.useContext {
+		if id, err := a.ensureContext(ctx, model, system); err == nil && id != "" {
+			body := map[string]any{
+				"model":      model,
+				"context_id": id,
+				"messages":   []arkMessage{{Role: "user", Content: user}},
+				"stream":     true,
+				"thinking":   arkThinking{Type: "disabled"},
+			}
+			if e := a.streamReq(ctx, a.baseURL+"/context/chat/completions", body, onDelta); e == nil {
+				return nil
+			} else {
+				log.Printf("[ark] 上下文 chat 失败，回退普通: %v", e)
+			}
+		} else if err != nil {
+			log.Printf("[ark] 上下文缓存不可用(需 ep 接入点)，回退普通: %v", err)
+		}
+	}
+	body := map[string]any{
+		"model": model,
+		"messages": []arkMessage{
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
 		},
-		Stream:   true,
-		Thinking: arkThinking{Type: "disabled"},
+		"stream":   true,
+		"thinking": arkThinking{Type: "disabled"},
+	}
+	return a.streamReq(ctx, a.baseURL+"/chat/completions", body, onDelta)
+}
+
+// ensureContext：按 (model+system) 复用 context_id；不存在或过期则创建。
+func (a *ArkLLM) ensureContext(ctx context.Context, model, system string) (string, error) {
+	key := model + "\x00" + system
+	a.mu.Lock()
+	if e, ok := a.ctxID[key]; ok && time.Since(e.at) < ctxLocalTTL {
+		id := e.id
+		a.mu.Unlock()
+		return id, nil
+	}
+	a.mu.Unlock()
+
+	id, err := a.createContext(ctx, model, system)
+	if err != nil {
+		return "", err
+	}
+	a.mu.Lock()
+	a.ctxID[key] = ctxEntry{id: id, at: time.Now()}
+	a.mu.Unlock()
+	return id, nil
+}
+
+func (a *ArkLLM) createContext(ctx context.Context, model, system string) (string, error) {
+	body := map[string]any{
+		"model":    model,
+		"mode":     "common_prefix",
+		"messages": []arkMessage{{Role: "system", Content: system}},
+		"ttl":      3600,
 	}
 	jb, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, "POST", a.baseURL+"/context/create", bytes.NewReader(jb))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.apiKey)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", a.baseURL+"/chat/completions", bytes.NewReader(jb))
+	resp, err := a.cli.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	buf := new(bytes.Buffer)
+	_, _ = buf.ReadFrom(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("context create http %d: %s", resp.StatusCode, buf.String())
+	}
+	var r struct {
+		ID        string `json:"id"`
+		ContextID string `json:"context_id"`
+	}
+	if e := json.Unmarshal(buf.Bytes(), &r); e != nil {
+		return "", e
+	}
+	if r.ID != "" {
+		return r.ID, nil
+	}
+	return r.ContextID, nil
+}
+
+// streamReq：发起一次 SSE 流式请求，逐块投给 onDelta。
+func (a *ArkLLM) streamReq(ctx context.Context, url string, body any, onDelta func(string)) error {
+	jb, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jb))
 	if err != nil {
 		return err
 	}
@@ -127,7 +220,6 @@ func (a *ArkLLM) Stream(ctx context.Context, model, system, user string, onDelta
 			return ctx.Err()
 		default:
 		}
-
 		line, err := reader.ReadString('\n')
 		if len(line) > 0 {
 			line = strings.TrimRight(line, "\r\n")
@@ -136,21 +228,19 @@ func (a *ArkLLM) Stream(ctx context.Context, model, system, user string, onDelta
 				if data == "[DONE]" {
 					return nil
 				}
-				if data == "" {
-					continue
-				}
-				var chunk arkStreamChunk
-				if e := json.Unmarshal([]byte(data), &chunk); e == nil {
-					for _, c := range chunk.Choices {
-						if c.Delta.Content != "" {
-							onDelta(c.Delta.Content)
+				if data != "" {
+					var chunk arkStreamChunk
+					if e := json.Unmarshal([]byte(data), &chunk); e == nil {
+						for _, c := range chunk.Choices {
+							if c.Delta.Content != "" {
+								onDelta(c.Delta.Content)
+							}
 						}
 					}
 				}
 			}
 		}
 		if err != nil {
-			// io.EOF 或其他：结束
 			return nil
 		}
 	}

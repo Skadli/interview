@@ -21,6 +21,7 @@ services:
       VOLC_RESOURCE_ID: ${VOLC_RESOURCE_ID:-volc.bigasr.sauc.duration}  # ASR 模型选择器：开通2.0即为2.0
       VOLC_ASR_MODEL: ${VOLC_ASR_MODEL:-bigmodel}                       # 请求 model_name（服务端不强校验）
       ARK_API_KEY: ${ARK_API_KEY:-}             # ← .env（方舟豆包 LLM，另一个 key）
+      ARK_CONTEXT_CACHE: ${ARK_CONTEXT_CACHE:-false}  # 上下文缓存压首字延迟(需 ep 接入点)，默认关
     depends_on:
       voiceprint:
         condition: service_started
