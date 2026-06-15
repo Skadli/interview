@@ -15,8 +15,8 @@ services:
     environment:
       ASR_PROVIDER: volc                         # 免 key 先跑通界面就改成 mock
       LLM_PROVIDER: ark                          # 免 key 先跑通界面就改成 mock
-      MODEL_FAST: doubao-seed-1.6-flash
-      MODEL_STRONG: doubao-seed-1.6
+      MODEL_FAST: doubao-seed-2-0-mini-260428    # 最新快模型(2.0 mini)
+      MODEL_STRONG: doubao-seed-2-0-mini-260428  # 结构化也先用它；开通 2.0 lite/pro 后可换
       SPEAKER_SIDECAR_URL: http://voiceprint:8101  # 指向内网服务，必须设
       CONTEXT_URL: http://context:8102             # 指向内网服务，必须设
       VOLC_API_KEY: ${VOLC_API_KEY:-}            # ← .env（火山语音 ASR，新版统一鉴权）

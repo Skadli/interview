@@ -74,8 +74,8 @@ func loadConfig() Config {
 
 		ArkAPIKey:   os.Getenv("ARK_API_KEY"),
 		ArkBaseURL:  env("ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),
-		ModelFast:   env("MODEL_FAST", "doubao-seed-1.6-flash"),
-		ModelStrong: env("MODEL_STRONG", "doubao-seed-1.6"),
+		ModelFast:   env("MODEL_FAST", "doubao-seed-2-0-mini-260428"),
+		ModelStrong: env("MODEL_STRONG", "doubao-seed-2-0-mini-260428"),
 
 		SpeakerSidecarURL: os.Getenv("SPEAKER_SIDECAR_URL"),
 		SpeakerThresh:     envF("SPEAKER_THRESH", 0.75),

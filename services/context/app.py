@@ -34,7 +34,7 @@ from pydantic import BaseModel
 
 ARK_API_KEY = os.environ.get("ARK_API_KEY", "").strip()
 ARK_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
-ARK_MODEL = "doubao-seed-1.6"
+ARK_MODEL = os.environ.get("ARK_MODEL", "doubao-seed-2-0-mini-260428")
 
 # Minimum chars of extracted PDF text to consider it a "text" PDF (not scanned).
 MIN_PDF_TEXT_LEN = 40
