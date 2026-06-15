@@ -5,15 +5,18 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# resemblyzer -> librosa -> soundfile 需要 libsndfile；curl 供健康检查
+# 运行时依赖：libsndfile1(librosa/soundfile)、curl(健康检查)
+# 构建期依赖：build-essential —— 编译 webrtcvad(resemblyzer 的 C 扩展依赖，无预编译轮子)，装完即清理
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      libsndfile1 curl \
+      libsndfile1 curl build-essential \
  && rm -rf /var/lib/apt/lists/*
 
 COPY services/voiceprint/requirements.txt ./
-# 先装 CPU 版 torch（不拉 CUDA，体积小很多），再装其余依赖
+# 先装 CPU 版 torch（不拉 CUDA，体积小很多），再装其余依赖；最后清理编译器以瘦身
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
- && pip install --no-cache-dir -r requirements.txt
+ && pip install --no-cache-dir -r requirements.txt \
+ && apt-get purge -y --auto-remove build-essential \
+ && rm -rf /root/.cache
 
 COPY services/voiceprint/ ./
 
