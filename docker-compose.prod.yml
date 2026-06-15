@@ -18,7 +18,8 @@ services:
       SPEAKER_SIDECAR_URL: http://voiceprint:8101  # 指向内网服务，必须设
       CONTEXT_URL: http://context:8102             # 指向内网服务，必须设
       VOLC_API_KEY: ${VOLC_API_KEY:-}            # ← .env（火山语音 ASR，新版统一鉴权）
-      VOLC_RESOURCE_ID: ${VOLC_RESOURCE_ID:-volc.bigasr.sauc.duration}
+      VOLC_RESOURCE_ID: ${VOLC_RESOURCE_ID:-volc.bigasr.sauc.duration}  # ASR 模型选择器：开通2.0即为2.0
+      VOLC_ASR_MODEL: ${VOLC_ASR_MODEL:-bigmodel}                       # 请求 model_name（服务端不强校验）
       ARK_API_KEY: ${ARK_API_KEY:-}             # ← .env（方舟豆包 LLM，另一个 key）
     depends_on:
       voiceprint:

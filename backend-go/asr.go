@@ -259,7 +259,7 @@ func (v *VolcASR) sendFullRequest() error {
 			"format": "pcm", "codec": "raw", "rate": 16000, "bits": 16, "channel": 1,
 		},
 		"request": map[string]any{
-			"model_name":      "bigmodel",
+			"model_name":      v.cfg.VolcASRModel,
 			"enable_punc":     true,
 			"enable_itn":      true,
 			"enable_ddc":      true,

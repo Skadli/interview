@@ -16,7 +16,8 @@ type Config struct {
 	VolcAPIKey     string // 新版统一鉴权 X-Api-Key（优先）
 	VolcAppKey     string // 旧版鉴权 X-Api-App-Key
 	VolcAccessKey  string // 旧版鉴权 X-Api-Access-Key
-	VolcResourceID string
+	VolcResourceID string // 真正的 ASR 模型选择器（开通哪个模型就对应哪个 resource id）
+	VolcASRModel   string // 请求里的 model_name（服务端不强校验，留作占位/兼容）
 	VolcASRURL     string
 
 	// 火山方舟（豆包 1.6）
@@ -70,6 +71,7 @@ func loadConfig() Config {
 		VolcAppKey:     os.Getenv("VOLC_APP_KEY"),
 		VolcAccessKey:  os.Getenv("VOLC_ACCESS_KEY"),
 		VolcResourceID: env("VOLC_RESOURCE_ID", "volc.bigasr.sauc.duration"),
+		VolcASRModel:   env("VOLC_ASR_MODEL", "bigmodel"),
 		VolcASRURL:     env("VOLC_ASR_URL", "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"),
 
 		ArkAPIKey:   os.Getenv("ARK_API_KEY"),
