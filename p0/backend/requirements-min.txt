@@ -1,0 +1,4 @@
+# 阶段A：最小依赖——跑通"管道+能量VAD+mock ASR/LLM+延迟测量"，无需 key、无需 torch
+fastapi
+uvicorn[standard]
+numpy

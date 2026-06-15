@@ -1,0 +1,8 @@
+# 声纹(说话人验证)服务依赖
+# 注意: resemblyzer 会自动带入 torch(它的运行时依赖)。
+# torch 在 Python 3.14 上没有预编译 wheel, 必须在服务器上用 Python 3.11 或 3.12 安装。
+# 详见 README.md。
+fastapi
+uvicorn[standard]
+numpy
+resemblyzer

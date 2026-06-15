@@ -1,0 +1,14 @@
+# 减小构建上下文 & 避免把 Windows 本地产物带进镜像
+**/.venv
+**/.venv_selftest
+**/node_modules
+web/dist
+**/__pycache__
+**/*.pyc
+**/*.pyo
+backend-go/interview-backend
+backend-go/interview-backend.exe
+p0/
+**/*.log
+.git
+*.pem

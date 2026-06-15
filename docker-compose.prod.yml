@@ -1,0 +1,59 @@
+name: interview-assistant
+
+# 生产编排：直接拉取 GHCR 预构建镜像（不在服务器本地构建）。
+# 用法（服务器）：
+#   cp .env.example .env   # 填火山/豆包 key
+#   export IMAGE_OWNER=skadli   # 你的 GitHub 用户名(小写)
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+# 镜像由 GitHub Actions 自动构建推送。
+
+services:
+  backend:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_OWNER:-skadli}/interview-backend:${TAG:-latest}
+    ports:
+      - "8000:8000"
+    environment:
+      ADDR: ":8000"
+      FRONTEND_DIR: /app/web/dist
+      ASR_PROVIDER: ${ASR_PROVIDER:-volc}
+      LLM_PROVIDER: ${LLM_PROVIDER:-ark}
+      VOLC_APP_KEY: ${VOLC_APP_KEY:-}
+      VOLC_ACCESS_KEY: ${VOLC_ACCESS_KEY:-}
+      VOLC_RESOURCE_ID: ${VOLC_RESOURCE_ID:-volc.bigasr.sauc.duration}
+      VOLC_ASR_URL: ${VOLC_ASR_URL:-wss://openspeech.bytedance.com/api/v3/sauc/bigmodel}
+      ARK_API_KEY: ${ARK_API_KEY:-}
+      ARK_BASE_URL: ${ARK_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}
+      MODEL_FAST: ${MODEL_FAST:-doubao-seed-1.6-flash}
+      MODEL_STRONG: ${MODEL_STRONG:-doubao-seed-1.6}
+      SPEAKER_SIDECAR_URL: http://voiceprint:8101
+      SPEAKER_THRESH: ${SPEAKER_THRESH:-0.75}
+      CONTEXT_URL: http://context:8102
+      ENDPOINT_MS: ${ENDPOINT_MS:-650}
+    depends_on:
+      voiceprint:
+        condition: service_started
+      context:
+        condition: service_healthy
+    restart: unless-stopped
+
+  voiceprint:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_OWNER:-skadli}/interview-voiceprint:${TAG:-latest}
+    environment:
+      PORT: "8101"
+      SPEAKER_THRESH: ${SPEAKER_THRESH:-0.75}
+      SESSION_TTL_SEC: ${SESSION_TTL_SEC:-1800}
+      MAX_SESSIONS: ${MAX_SESSIONS:-500}
+    expose:
+      - "8101"
+    restart: unless-stopped
+
+  context:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_OWNER:-skadli}/interview-context:${TAG:-latest}
+    environment:
+      PORT: "8102"
+      ARK_API_KEY: ${ARK_API_KEY:-}
+      ARK_BASE_URL: ${ARK_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}
+    expose:
+      - "8102"
+    restart: unless-stopped

@@ -1,0 +1,12 @@
+# 完整依赖（含真实 VAD + 声纹分离 + 阿里 DashScope + HTTPS 自签证书）
+-r requirements-min.txt
+
+# 阶段B：真实 VAD + 说话人分离（较重，会带入 torch）
+silero-vad
+resemblyzer
+
+# 阶段C：真实 ASR + LLM（阿里 DashScope，一个 key 通用）
+dashscope
+
+# 手机访问需要 HTTPS：用它生成自签证书
+cryptography

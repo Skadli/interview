@@ -1,0 +1,33 @@
+# ===== Python =====
+**/.venv/
+**/.venv_selftest/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# ===== Node / 前端构建产物 =====
+**/node_modules/
+web/dist/
+
+# ===== Go 构建产物 =====
+backend-go/interview-backend
+backend-go/interview-backend.exe
+*.exe
+
+# ===== 机密 / 本地配置（绝不提交）=====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ===== 日志 / 临时 =====
+*.log
+tmp/
+*.tmp
+
+# ===== 系统 / IDE =====
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

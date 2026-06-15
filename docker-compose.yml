@@ -1,0 +1,64 @@
+name: interview-assistant
+
+# 完整编排：Go 实时核心(含前端) + 声纹 + 上下文。
+# 手机只需访问 backend 的 8000 端口（同源 /ws 与 /ctx，内部反代到各服务）。
+# 配置见同目录 .env（复制 .env.example）。
+
+services:
+  backend:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_OWNER:-skadli}/interview-backend:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: backend-go/Dockerfile
+    ports:
+      - "8000:8000"          # 对外唯一入口：前端 + /ws + /ctx
+    environment:
+      ADDR: ":8000"
+      FRONTEND_DIR: /app/web/dist
+      ASR_PROVIDER: ${ASR_PROVIDER:-volc}      # 无 key 想先跑通可设 mock
+      LLM_PROVIDER: ${LLM_PROVIDER:-ark}        # 无 key 想先跑通可设 mock
+      VOLC_APP_KEY: ${VOLC_APP_KEY:-}
+      VOLC_ACCESS_KEY: ${VOLC_ACCESS_KEY:-}
+      VOLC_RESOURCE_ID: ${VOLC_RESOURCE_ID:-volc.bigasr.sauc.duration}
+      VOLC_ASR_URL: ${VOLC_ASR_URL:-wss://openspeech.bytedance.com/api/v3/sauc/bigmodel}
+      ARK_API_KEY: ${ARK_API_KEY:-}
+      ARK_BASE_URL: ${ARK_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}
+      MODEL_FAST: ${MODEL_FAST:-doubao-seed-1.6-flash}
+      MODEL_STRONG: ${MODEL_STRONG:-doubao-seed-1.6}
+      SPEAKER_SIDECAR_URL: http://voiceprint:8101
+      SPEAKER_THRESH: ${SPEAKER_THRESH:-0.75}
+      CONTEXT_URL: http://context:8102
+      ENDPOINT_MS: ${ENDPOINT_MS:-650}
+    depends_on:
+      voiceprint:
+        condition: service_started   # 声纹加载 torch 较慢；未就绪时后端自动降级(全判面试官)，不阻塞启动
+      context:
+        condition: service_healthy   # 上下文很快；前端 /ctx 依赖它，等其就绪
+    restart: unless-stopped
+
+  voiceprint:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_OWNER:-skadli}/interview-voiceprint:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: services/voiceprint/Dockerfile
+    environment:
+      PORT: "8101"
+      SPEAKER_THRESH: ${SPEAKER_THRESH:-0.75}
+      SESSION_TTL_SEC: ${SESSION_TTL_SEC:-1800}
+      MAX_SESSIONS: ${MAX_SESSIONS:-500}
+    expose:
+      - "8101"               # 仅内网；不对外暴露
+    restart: unless-stopped
+
+  context:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_OWNER:-skadli}/interview-context:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: services/context/Dockerfile
+    environment:
+      PORT: "8102"
+      ARK_API_KEY: ${ARK_API_KEY:-}
+      ARK_BASE_URL: ${ARK_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}
+    expose:
+      - "8102"               # 仅内网；前端经 backend 的 /ctx 反代访问
+    restart: unless-stopped
