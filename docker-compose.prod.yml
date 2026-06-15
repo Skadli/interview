@@ -1,34 +1,25 @@
 name: interview-assistant
 
-# 生产编排：直接拉取 GHCR 预构建镜像（不在服务器本地构建）。
-# 用法（服务器）：
-#   cp .env.example .env        # 只需填 3 个 key
+# 生产编排：拉取 GHCR 预构建镜像。只需在 .env 填 3 个 key，其余用镜像内置默认值。
+#   cp .env.example .env
 #   docker compose -f docker-compose.prod.yml pull
 #   docker compose -f docker-compose.prod.yml up -d
-# 镜像由 GitHub Actions 自动构建推送。除 3 个 key 外，配置均已写死在本文件。
 
 services:
   backend:
     image: ghcr.io/skadli/interview-backend:latest
     ports:
-      - "8000:8000"                 # 对外唯一入口：前端 + /ws + /ctx
+      - "8000:8000"                              # 对外唯一入口（前端 + /ws + /ctx）
     environment:
-      ADDR: ":8000"
-      FRONTEND_DIR: /app/web/dist
-      ASR_PROVIDER: volc            # 免 key 先跑通界面：改成 mock
-      LLM_PROVIDER: ark             # 免 key 先跑通界面：改成 mock
-      VOLC_APP_KEY: ${VOLC_APP_KEY:-}        # ← 在 .env 填
-      VOLC_ACCESS_KEY: ${VOLC_ACCESS_KEY:-}  # ← 在 .env 填
-      ARK_API_KEY: ${ARK_API_KEY:-}          # ← 在 .env 填
-      VOLC_RESOURCE_ID: volc.bigasr.sauc.duration
-      VOLC_ASR_URL: wss://openspeech.bytedance.com/api/v3/sauc/bigmodel
-      ARK_BASE_URL: https://ark.cn-beijing.volces.com/api/v3
+      ASR_PROVIDER: volc                         # 免 key 先跑通界面就改成 mock
+      LLM_PROVIDER: ark                          # 免 key 先跑通界面就改成 mock
       MODEL_FAST: doubao-seed-1.6-flash
       MODEL_STRONG: doubao-seed-1.6
-      SPEAKER_SIDECAR_URL: http://voiceprint:8101
-      SPEAKER_THRESH: "0.75"
-      CONTEXT_URL: http://context:8102
-      ENDPOINT_MS: "650"
+      SPEAKER_SIDECAR_URL: http://voiceprint:8101  # 指向内网服务，必须设
+      CONTEXT_URL: http://context:8102             # 指向内网服务，必须设
+      VOLC_APP_KEY: ${VOLC_APP_KEY:-}            # ← .env
+      VOLC_ACCESS_KEY: ${VOLC_ACCESS_KEY:-}      # ← .env
+      ARK_API_KEY: ${ARK_API_KEY:-}             # ← .env
     depends_on:
       voiceprint:
         condition: service_started
@@ -38,21 +29,14 @@ services:
 
   voiceprint:
     image: ghcr.io/skadli/interview-voiceprint:latest
-    environment:
-      PORT: "8101"
-      SPEAKER_THRESH: "0.75"
-      SESSION_TTL_SEC: "1800"
-      MAX_SESSIONS: "500"
-    expose:
-      - "8101"                      # 仅内网
+    ports:
+      - "8101:8101"                              # 公网服务器建议改 "127.0.0.1:8101:8101" 只本机可访问
     restart: unless-stopped
 
   context:
     image: ghcr.io/skadli/interview-context:latest
+    ports:
+      - "8102:8102"                              # 公网服务器建议改 "127.0.0.1:8102:8102" 只本机可访问
     environment:
-      PORT: "8102"
-      ARK_API_KEY: ${ARK_API_KEY:-}          # ← 在 .env 填
-      ARK_BASE_URL: https://ark.cn-beijing.volces.com/api/v3
-    expose:
-      - "8102"                      # 仅内网，前端经 backend 的 /ctx 反代访问
+      ARK_API_KEY: ${ARK_API_KEY:-}             # ← .env（简历结构化/公司简报用，与上面同一个 key）
     restart: unless-stopped
