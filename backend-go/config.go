@@ -13,8 +13,9 @@ type Config struct {
 	LLMProvider string // mock | ark
 
 	// 火山大模型流式 ASR
-	VolcAppKey     string
-	VolcAccessKey  string
+	VolcAPIKey     string // 新版统一鉴权 X-Api-Key（优先）
+	VolcAppKey     string // 旧版鉴权 X-Api-App-Key
+	VolcAccessKey  string // 旧版鉴权 X-Api-Access-Key
 	VolcResourceID string
 	VolcASRURL     string
 
@@ -65,6 +66,7 @@ func loadConfig() Config {
 		ASRProvider: env("ASR_PROVIDER", "mock"),
 		LLMProvider: env("LLM_PROVIDER", "mock"),
 
+		VolcAPIKey:     os.Getenv("VOLC_API_KEY"),
 		VolcAppKey:     os.Getenv("VOLC_APP_KEY"),
 		VolcAccessKey:  os.Getenv("VOLC_ACCESS_KEY"),
 		VolcResourceID: env("VOLC_RESOURCE_ID", "volc.bigasr.sauc.duration"),

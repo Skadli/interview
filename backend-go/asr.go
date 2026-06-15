@@ -201,8 +201,14 @@ type VolcASR struct {
 
 func NewVolcASR(cfg Config) (*VolcASR, error) {
 	header := http.Header{}
-	header.Set("X-Api-App-Key", cfg.VolcAppKey)
-	header.Set("X-Api-Access-Key", cfg.VolcAccessKey)
+	if cfg.VolcAPIKey != "" {
+		// 新版统一鉴权：单个 X-Api-Key
+		header.Set("X-Api-Key", cfg.VolcAPIKey)
+	} else {
+		// 旧版鉴权：App Key + Access Token
+		header.Set("X-Api-App-Key", cfg.VolcAppKey)
+		header.Set("X-Api-Access-Key", cfg.VolcAccessKey)
+	}
 	header.Set("X-Api-Resource-Id", cfg.VolcResourceID)
 	header.Set("X-Api-Request-Id", uuid4())
 

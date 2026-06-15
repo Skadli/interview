@@ -1,6 +1,6 @@
 name: interview-assistant
 
-# 开发/自建编排：本地构建镜像。只需在 .env 填 3 个 key，其余用镜像内置默认值。
+# 开发/自建编排：本地构建镜像。只需在 .env 填 key，其余用镜像内置默认值。
 #   cp .env.example .env
 #   docker compose up -d --build
 
@@ -19,9 +19,9 @@ services:
       MODEL_STRONG: doubao-seed-1.6
       SPEAKER_SIDECAR_URL: http://voiceprint:8101  # 指向内网服务，必须设
       CONTEXT_URL: http://context:8102             # 指向内网服务，必须设
-      VOLC_APP_KEY: ${VOLC_APP_KEY:-}            # ← .env
-      VOLC_ACCESS_KEY: ${VOLC_ACCESS_KEY:-}      # ← .env
-      ARK_API_KEY: ${ARK_API_KEY:-}             # ← .env
+      VOLC_API_KEY: ${VOLC_API_KEY:-}            # ← .env（火山语音 ASR，新版统一鉴权）
+      VOLC_RESOURCE_ID: ${VOLC_RESOURCE_ID:-volc.bigasr.sauc.duration}
+      ARK_API_KEY: ${ARK_API_KEY:-}             # ← .env（方舟豆包 LLM，另一个 key）
     depends_on:
       voiceprint:
         condition: service_started
@@ -46,5 +46,5 @@ services:
     ports:
       - "8102:8102"
     environment:
-      ARK_API_KEY: ${ARK_API_KEY:-}             # ← .env（与上面同一个 key）
+      ARK_API_KEY: ${ARK_API_KEY:-}             # ← .env（与 backend 同一个方舟 key）
     restart: unless-stopped
