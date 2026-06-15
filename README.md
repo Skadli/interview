@@ -19,12 +19,14 @@ flowchart LR
   end
 ```
 
-| 服务 | 目录 | 端口 | 语言/技术 | 职责 |
+> 部署为**单个镜像** `ghcr.io/skadli/interview`：容器内由 supervisor 同时拉起下面三个进程（前端由 Go 托管）。
+
+| 组件 | 目录 | 容器内端口 | 语言/技术 | 职责 |
 |---|---|---|---|---|
 | 实时核心 | [backend-go/](backend-go/) | 8000（对外唯一入口） | Go + gorilla/websocket | WS 网关、火山 ASR 流、豆包 LLM 流、编排、声纹调用、托管前端、`/ctx` 反代 |
-| 声纹 | [services/voiceprint/](services/voiceprint/) | 8101（内网） | Python + resemblyzer | 声纹注册 + 逐句验证（区分本人/面试官） |
-| 上下文 | [services/context/](services/context/) | 8102（内网） | Python + PyMuPDF + 豆包多模态 | 简历解析、公司简报 |
-| 前端 | [web/](web/) | 构建产物由 backend 托管 | Vite + TS (PWA) | 采集/注册/双模式/流式/历史/简历上传 |
+| 声纹 | [services/voiceprint/](services/voiceprint/) | 8101（容器内） | Python + resemblyzer | 声纹注册 + 逐句验证（区分本人/面试官） |
+| 上下文 | [services/context/](services/context/) | 8102（容器内） | Python + PyMuPDF + 豆包多模态 | 简历解析、公司简报 |
+| 前端 | [web/](web/) | 由 backend 托管 | Vite + TS (PWA) | 采集/注册/双模式/流式/历史/简历上传 |
 
 手机端只接触 **8000** 一个端口：`/ws`(语音) 与 `/ctx`(简历/公司) 都经 backend 同源转发，省去 CORS 与 HTTPS 混合内容问题。
 
@@ -37,7 +39,8 @@ docker compose up -d --build
 ```
 
 - 还没有火山 key？把 `.env` 里 `ASR_PROVIDER` 和 `LLM_PROVIDER` 都改成 `mock`，即可先把界面与链路跑起来。
-- 首次启动 `voiceprint` 会装 CPU 版 torch 并加载模型，健康检查 start-period 给了 180s，请耐心等其 healthy 后 backend 才启动。
+- 镜像默认含 CPU 版 torch（声纹用），较大较慢；**想要小镜像**：`docker compose build --build-arg WITH_TORCH=0`（声纹降级为不分离，体积大幅减小）。
+- 容器内声纹加载 torch 需时间；对外的 `:8000` 健康检查很快就绪。
 
 ## 无需 GPU
 
@@ -64,27 +67,26 @@ cd services/voiceprint; ./run.ps1
 
 ## 火山凭证从哪拿
 
-- **大模型流式 ASR**：火山引擎控制台 → 语音技术 → 开通「大模型流式语音识别」，拿 App Key / Access Key（`X-Api-App-Key` / `X-Api-Access-Key`），Resource-Id 默认 `volc.bigasr.sauc.duration`。
-- **豆包 LLM**：火山引擎控制台 → 火山方舟 → 在线推理，拿 API Key（`ARK_API_KEY`）。模型用 `doubao-seed-1.6-flash`（快）/ `doubao-seed-1.6`（强）。
+- **流式 ASR**：火山引擎控制台 → 语音技术 → 开通「豆包流式语音识别2.0」，新版控制台拿单个 **API Key**（填 `VOLC_API_KEY`，走 `X-Api-Key`）；`VOLC_RESOURCE_ID` 默认 `volc.bigasr.sauc.duration`（它才是真正的"用哪个模型"开关）。
+- **豆包 LLM**：火山方舟 → 开通模型 / 创建推理接入点，拿 **API Key**（`ARK_API_KEY`，与语音 key 不是同一个）。模型默认 `doubao-seed-2-0-mini-260428`（最新快模型）；用接入点 `ep-xxx` 可启用上下文缓存（`ARK_CONTEXT_CACHE=true`）。
 
 ## 环境变量
 
-见 [.env.example](.env.example)。要点：`VOLC_APP_KEY`/`VOLC_ACCESS_KEY`（ASR）、`ARK_API_KEY`（LLM/简历/公司）、`ASR_PROVIDER`/`LLM_PROVIDER`(volc/ark 或 mock)、`SPEAKER_THRESH`、`MODEL_FAST`/`MODEL_STRONG`。
+见 [.env.example](.env.example)。要点：`VOLC_API_KEY`（语音 ASR，新版统一鉴权）、`ARK_API_KEY`（方舟豆包 LLM）、`ASR_PROVIDER`/`LLM_PROVIDER`(volc/ark 或 mock)、`MODEL_FAST`/`MODEL_STRONG`、`ARK_CONTEXT_CACHE`、`VOLC_RESOURCE_ID`。
 
 ## CI/CD 与发布
 
-推送代码后由 GitHub Actions（[.github/workflows/build-and-publish.yml](.github/workflows/build-and-publish.yml)）自动构建 3 个镜像并推送到 **GHCR**：
-`ghcr.io/skadli/interview-backend`、`-voiceprint`、`-context`。
+推送代码后由 GitHub Actions（[.github/workflows/build-and-publish.yml](.github/workflows/build-and-publish.yml)）自动构建**单个三合一镜像**并推送到 **GHCR**：`ghcr.io/skadli/interview`。
 
 - **发版**：`./scripts/release.sh v1.0.0`（打标签触发构建，产出 `:1.0.0` 与 `:latest`）。
 - **服务器拉取发布**：`./scripts/deploy.sh`（`docker compose -f docker-compose.prod.yml pull && up -d`）。
-- **自动部署（可选）**：在仓库 Settings → Secrets 配置 `DEPLOY_SSH_HOST`/`DEPLOY_SSH_USER`/`DEPLOY_SSH_KEY`/`DEPLOY_PATH`（私有镜像再加 `GHCR_USER`/`GHCR_TOKEN`），则 push main 或打标签后自动 SSH 到服务器 `pull && up -d`。未配置则只发布镜像、不部署。
+- **自动部署（可选）**：仓库 Settings → Secrets 配 `DEPLOY_SSH_HOST`/`DEPLOY_SSH_USER`/`DEPLOY_SSH_KEY`/`DEPLOY_PATH`（私有镜像再加 `GHCR_USER`/`GHCR_TOKEN`），push main 或打标签后自动 SSH 到服务器 `pull && up -d`。未配置则只发布镜像。
 
-生产服务器用 [docker-compose.prod.yml](docker-compose.prod.yml)（直接拉镜像，不本地构建）：
+生产服务器用 [docker-compose.prod.yml](docker-compose.prod.yml)（拉单镜像，不本地构建）：
 ```bash
-cp .env.example .env          # 只需填 3 个 key（镜像地址等已写死在 compose 里）
+cp .env.example .env          # 只需填 key
 docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d
-# GHCR 包默认私有：先 docker login ghcr.io（用户名 + 一个有 read:packages 的 PAT），或在仓库把 3 个包设为 Public
+# GHCR 包默认私有：先 docker login ghcr.io（用户名 + read:packages 的 PAT），或在仓库把包设为 Public
 ```
 
 ## 各服务文档

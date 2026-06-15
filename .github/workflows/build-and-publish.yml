@@ -1,7 +1,7 @@
 name: build-and-publish
 
-# 触发：推送到 main / 打 v* 标签 / 手动。
-# 产物：3 个镜像推送到 GHCR（ghcr.io/<owner>/interview-{backend,voiceprint,context}）。
+# 推送到 main / 打 v* 标签 / 手动 → 构建单个三合一镜像并推送到 GHCR：
+#   ghcr.io/<owner>/interview
 # 可选：打标签时若配置了 SSH 密钥，自动 SSH 到服务器拉取并发布。
 
 on:
@@ -19,19 +19,9 @@ jobs:
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        include:
-          - image: interview-backend
-            dockerfile: backend-go/Dockerfile
-          - image: interview-voiceprint
-            dockerfile: services/voiceprint/Dockerfile
-          - image: interview-context
-            dockerfile: services/context/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
-      # GHCR 要求镜像路径全小写，owner 可能含大写，这里转小写
       - id: vars
         run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
@@ -46,7 +36,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ steps.vars.outputs.owner }}/${{ matrix.image }}
+          images: ${{ env.REGISTRY }}/${{ steps.vars.outputs.owner }}/interview
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -56,7 +46,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -66,7 +56,6 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    # 仅在 main 推送或打标签时尝试部署
     if: github.ref == 'refs/heads/main' || github.ref_type == 'tag'
     steps:
       - name: 检查是否配置了部署密钥
@@ -90,11 +79,9 @@ jobs:
           script: |
             set -e
             cd ${{ secrets.DEPLOY_PATH }}
-            # 若 GHCR 包私有，需登录（在服务器配 GHCR_USER/GHCR_TOKEN secret）
             if [ -n "${{ secrets.GHCR_TOKEN }}" ]; then
               echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USER }}" --password-stdin
             fi
-            export TAG=latest
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d
             docker image prune -f

@@ -1,44 +1,23 @@
 name: interview-assistant
 
-# 生产编排：拉取 GHCR 预构建镜像。只需在 .env 填 key，其余用镜像内置默认值。
+# 生产：拉取 GHCR 单镜像（三合一）。只需 .env 填 key。
 #   cp .env.example .env
 #   docker compose -f docker-compose.prod.yml pull
 #   docker compose -f docker-compose.prod.yml up -d
 
 services:
-  backend:
-    image: ghcr.io/skadli/interview-backend:latest
+  app:
+    image: ghcr.io/skadli/interview:latest
     ports:
       - "8000:8000"                              # 对外唯一入口（前端 + /ws + /ctx）
     environment:
-      ASR_PROVIDER: volc                         # 免 key 先跑通界面就改成 mock
-      LLM_PROVIDER: ark                          # 免 key 先跑通界面就改成 mock
-      MODEL_FAST: doubao-seed-2-0-mini-260428    # 最新快模型(2.0 mini)
-      MODEL_STRONG: doubao-seed-2-0-mini-260428  # 结构化也先用它；开通 2.0 lite/pro 后可换
-      SPEAKER_SIDECAR_URL: http://voiceprint:8101  # 指向内网服务，必须设
-      CONTEXT_URL: http://context:8102             # 指向内网服务，必须设
-      VOLC_API_KEY: ${VOLC_API_KEY:-}            # ← .env（火山语音 ASR，新版统一鉴权）
-      VOLC_RESOURCE_ID: ${VOLC_RESOURCE_ID:-volc.bigasr.sauc.duration}  # ASR 模型选择器：开通2.0即为2.0
-      VOLC_ASR_MODEL: ${VOLC_ASR_MODEL:-bigmodel}                       # 请求 model_name（服务端不强校验）
-      ARK_API_KEY: ${ARK_API_KEY:-}             # ← .env（方舟豆包 LLM，另一个 key）
-      ARK_CONTEXT_CACHE: ${ARK_CONTEXT_CACHE:-false}  # 上下文缓存压首字延迟(需 ep 接入点)，默认关
-    depends_on:
-      voiceprint:
-        condition: service_started
-      context:
-        condition: service_healthy
-    restart: unless-stopped
-
-  voiceprint:
-    image: ghcr.io/skadli/interview-voiceprint:latest
-    ports:
-      - "8101:8101"                              # 公网服务器建议改 "127.0.0.1:8101:8101" 只本机可访问
-    restart: unless-stopped
-
-  context:
-    image: ghcr.io/skadli/interview-context:latest
-    ports:
-      - "8102:8102"                              # 公网服务器建议改 "127.0.0.1:8102:8102" 只本机可访问
-    environment:
-      ARK_API_KEY: ${ARK_API_KEY:-}             # ← .env（简历结构化/公司简报用，与 backend 同一个方舟 key）
+      ASR_PROVIDER: volc
+      LLM_PROVIDER: ark
+      MODEL_FAST: doubao-seed-2-0-mini-260428
+      MODEL_STRONG: doubao-seed-2-0-mini-260428
+      ARK_CONTEXT_CACHE: ${ARK_CONTEXT_CACHE:-false}
+      VOLC_API_KEY: ${VOLC_API_KEY:-}            # ← .env（火山语音 ASR）
+      VOLC_RESOURCE_ID: ${VOLC_RESOURCE_ID:-volc.bigasr.sauc.duration}
+      VOLC_ASR_MODEL: ${VOLC_ASR_MODEL:-bigmodel}
+      ARK_API_KEY: ${ARK_API_KEY:-}             # ← .env（方舟豆包 LLM）
     restart: unless-stopped
