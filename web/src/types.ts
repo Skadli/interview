@@ -21,12 +21,13 @@ export type ServerMsg =
   | { type: "question"; text: string }
   | { type: "answer_delta"; text: string }
   | { type: "answer_done"; timing: Timing }
-  | { type: "enrolled"; ok: boolean };
+  | { type: "enrolled"; ok: boolean; reason?: string };
 
 // 客户端 -> 服务端
 export type ClientMsg =
   | { type: "set_mode"; mode: Mode }
   | { type: "enroll_start" }
+  | { type: "enroll_stop" }
   | { type: "enroll_cancel" }
   | { type: "set_context"; resume_text: string; company_text: string }
   | { type: "regenerate" };

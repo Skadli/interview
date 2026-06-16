@@ -85,8 +85,9 @@ go run .
 - 二进制帧：Int16 PCM，单声道，16000Hz，小端。
 - 文本 JSON 控制：
   - `{"type":"set_mode","mode":"conversation"|"structured"}`
-  - `{"type":"enroll_start"}`
-  - `{"type":"enroll_cancel"}` — 停止/取消声纹注册（客户端主动或超时），清服务端 `enrolling` 标志
+  - `{"type":"enroll_start"}` — 开始声纹录音（服务端记录环形缓冲起点）
+  - `{"type":"enroll_stop"}` — 停止并用录到的音频完成注册（不依赖 ASR 句尾端点）
+  - `{"type":"enroll_cancel"}` — 放弃声纹注册（离开此步/超时），清 `enrolling` 标志、不注册
   - `{"type":"set_context","resume_text":"...","company_text":"..."}`
   - `{"type":"regenerate"}`
 
@@ -97,7 +98,7 @@ go run .
 - `{"type":"question","text":"..."}`
 - `{"type":"answer_delta","text":"..."}`
 - `{"type":"answer_done","timing":{...}}`
-- `{"type":"enrolled","ok":true}`
+- `{"type":"enrolled","ok":true}` — `ok=false` 时带 `reason`：`no_sidecar`/`too_short`/`no_speech`/`enroll_failed`
 
 `timing` 字段：`endpoint_ms`(信息性,上游端点等待), `speaker_ms`(声纹耗时), `asr_ms`(火山流式为0),
 `llm_ttft_ms`(声纹后→首字), `to_first_word_ms`(说完→首字), `perceived_first_word_ms`(=to_first_word, 火山端点已在上游),

@@ -452,7 +452,25 @@ function clearEnrollTimeout() {
   }
 }
 
-// 停止/取消注册：解除本地录音态并通知服务端解除武装，
+// 停止录音 = 用已录到的音频完成声纹注册（不依赖 ASR 句尾，停止即注册）。
+function stopEnroll() {
+  if (!enrolling) return;
+  clearEnrollTimeout();
+  enrolling = false; // 停止上行音频
+  btnEnroll.classList.remove("recording");
+  ws?.send({ type: "enroll_stop" });
+  enrollNote.className = "enroll-note";
+  enrollNote.textContent = "正在注册声纹…";
+  setStatus("处理中…", "on");
+  // 响应看门狗：后端无回应（如连接掉线）时给出可重试提示，避免卡在“正在注册”。
+  enrollTimer = window.setTimeout(() => {
+    enrollNote.className = "enroll-note err";
+    enrollNote.textContent = "注册超时，请重试。";
+    setStatus("注册超时", "err");
+  }, 5000);
+}
+
+// 放弃注册（离开此步/麦克风失败）：解除本地录音态并通知服务端解除武装，
 // 避免服务端一直 enrolling、把后续第一句真问题当成声纹样本吃掉。
 function cancelEnroll(msg: string, isErr = false) {
   clearEnrollTimeout();
@@ -465,9 +483,9 @@ function cancelEnroll(msg: string, isErr = false) {
 }
 
 btnEnroll.onclick = async () => {
-  // 录音中再次点击 = 停止（解决“录音不可停止”）。
+  // 录音中再次点击 = 停止并完成注册。
   if (enrolling) {
-    cancelEnroll("已停止录音，可重新点击注册。");
+    stopEnroll();
     return;
   }
   if (!ws || !ws.connected) {
@@ -483,14 +501,13 @@ btnEnroll.onclick = async () => {
     btnEnroll.classList.remove("ok");
     btnEnroll.classList.add("recording");
     enrollNote.className = "enroll-note";
-    enrollNote.textContent = "录音中：请正常说一句话…（再次点击可停止）";
+    enrollNote.textContent = "录音中：请说一句话（约 3 秒）…（再次点击完成）";
     setStatus("声纹注册中…", "on");
-    // 安全超时：ASR 迟迟不出句尾时自动停止，避免永远卡在录音态。
+    // 安全超时：用户忘记停止时自动完成注册（后端会校验时长/能量）。
     clearEnrollTimeout();
     enrollTimer = window.setTimeout(() => {
-      if (enrolling)
-        cancelEnroll("未检测到完整语音，请在安静环境下说一句话后重试。", true);
-    }, 12000);
+      if (enrolling) stopEnroll();
+    }, 8000);
   } catch (e) {
     enrolling = false;
     enrollNote.className = "enroll-note err";
@@ -594,10 +611,17 @@ function handleMsg(m: ServerMsg) {
         setStatus("声纹注册成功", "on");
         markDone(3, true);
       } else {
+        btnEnroll.classList.remove("ok");
+        const reasons: Record<string, string> = {
+          no_sidecar: "声纹模块未启用（所有声音都会判为面试官）。可直接跳过此步。",
+          too_short: "录音太短，请说一句完整的话（约 3 秒）再停止。",
+          no_speech: "没听到声音，请靠近麦克风说一句话后重试。",
+          enroll_failed: "声纹注册失败，请重试。",
+        };
         enrollNote.className = "enroll-note err";
         enrollNote.textContent =
-          "声纹模块不可用（所有声音都会判为面试官）。可重试或跳过。";
-        setStatus("声纹模块不可用", "err");
+          reasons[m.reason ?? ""] ?? "声纹注册未完成，可重试或跳过。";
+        setStatus("注册未完成", "err");
       }
       break;
   }

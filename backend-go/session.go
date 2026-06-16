@@ -91,11 +91,12 @@ type Session struct {
 	asrDead    bool      // 当前流已结束，下一帧音频触发重连
 	asrBackoff time.Time // 重连退避截止（连接失败后短暂不再重试）
 
-	mu          sync.Mutex // 保护 mode/enrolling/resume/company 及上面 asr 三件
-	mode        string
-	enrolling   bool
-	resumeText  string
-	companyText string
+	mu                sync.Mutex // 保护 mode/enrolling/resume/company 及上面 asr 三件
+	mode              string
+	enrolling         bool
+	enrollStartSample int64 // enroll_start 时的环形缓冲绝对样本号，停止时据此切出注册音频
+	resumeText        string
+	companyText       string
 
 	writeMu sync.Mutex // 串行化 ws 写
 	llmMu   sync.Mutex // 串行化 LLM（避免并发回答交错）
@@ -226,10 +227,14 @@ func (s *Session) handleControl(data []byte) {
 	case "enroll_start":
 		s.mu.Lock()
 		s.enrolling = true
+		s.enrollStartSample = s.ring.total() // 记录起点，停止时切 [起点,此刻] 作注册音频
 		s.mu.Unlock()
 		s.sendStatus("enrolling")
+	case "enroll_stop":
+		// 用户停止录音 → 用录到的音频完成声纹注册（不依赖 ASR 句尾端点）。
+		s.finishEnroll()
 	case "enroll_cancel":
-		// 客户端主动停止/超时：解除武装，避免后续第一句真问题被当成声纹样本吃掉。
+		// 放弃注册（离开此步/麦克风失败）：解除武装，不注册，避免后续第一句真问题被当成声纹样本。
 		s.mu.Lock()
 		s.enrolling = false
 		s.mu.Unlock()
@@ -281,27 +286,52 @@ func (s *Session) consumeASR(asr ASRStream, baseMs int64) {
 	}
 }
 
+// finishEnroll：用 enroll_start 以来录到的音频做声纹注册（由 enroll_stop / 超时触发，
+// 不依赖 ASR 句尾端点——声纹只需原始人声，不需要转写）。校验时长与能量，失败回带原因。
+func (s *Session) finishEnroll() {
+	s.mu.Lock()
+	if !s.enrolling {
+		s.mu.Unlock()
+		return // 已结束/已取消，忽略重复 stop
+	}
+	s.enrolling = false
+	startSmp := s.enrollStartSample
+	s.mu.Unlock()
+
+	sr := s.cfg.SampleRate
+	seg := s.ring.slice(msOf(startSmp, sr), msOf(s.ring.total(), sr))
+	durMs := msOf(int64(len(seg)), sr)
+
+	ok, reason := false, ""
+	switch {
+	case !s.speaker.Enabled():
+		reason = "no_sidecar"
+	case durMs < 800:
+		reason = "too_short"
+	case rmsI16(seg) < 0.01:
+		reason = "no_speech"
+	case s.speaker.Enroll(seg):
+		ok = true
+	default:
+		reason = "enroll_failed"
+	}
+	s.send(map[string]any{"type": "enrolled", "ok": ok, "reason": reason})
+}
+
 func (s *Session) handleFinal(ev ASREvent) {
 	tEnd := time.Now()
 
-	// 按 [start,end] 从环形缓冲切出该句音频
-	seg := s.ring.slice(ev.StartMs, ev.EndMs)
-
-	// enrolling：注册声纹后返回
+	// 注册阶段：忽略 ASR 句子（注册由 enroll_stop 显式驱动，见 finishEnroll），
+	// 既不当作提问，也不在此注册声纹。
 	s.mu.Lock()
 	enrolling := s.enrolling
 	s.mu.Unlock()
 	if enrolling {
-		ok := false
-		if s.speaker.Enabled() {
-			ok = s.speaker.Enroll(seg)
-		}
-		s.mu.Lock()
-		s.enrolling = false
-		s.mu.Unlock()
-		s.send(map[string]any{"type": "enrolled", "ok": ok})
 		return
 	}
+
+	// 按 [start,end] 从环形缓冲切出该句音频（用于声纹验证）
+	seg := s.ring.slice(ev.StartMs, ev.EndMs)
 
 	// 说话人判定
 	var (
