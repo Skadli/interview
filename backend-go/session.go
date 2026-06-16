@@ -46,6 +46,13 @@ func (r *ringBuffer) write(pcm []int16) {
 	}
 }
 
+// total：已写入的累计样本数（= 下一个待写样本的全局样本号）。
+func (r *ringBuffer) total() int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.base + int64(len(r.data))
+}
+
 // slice：按毫秒区间 [startMs,endMs] 取出该段 PCM。越界自动裁剪。
 func (r *ringBuffer) slice(startMs, endMs int64) []int16 {
 	r.mu.Lock()
@@ -79,9 +86,12 @@ type Session struct {
 	speaker Speaker
 	ring    *ringBuffer
 
-	asr ASRStream
+	// asr/asrDead/asrBackoff 受 mu 保护：ASR 流惰性建连（首帧音频才拨号）、断线自动重连。
+	asr        ASRStream
+	asrDead    bool      // 当前流已结束，下一帧音频触发重连
+	asrBackoff time.Time // 重连退避截止（连接失败后短暂不再重试）
 
-	mu          sync.Mutex // 保护 mode/enrolling/resume/company
+	mu          sync.Mutex // 保护 mode/enrolling/resume/company 及上面 asr 三件
 	mode        string
 	enrolling   bool
 	resumeText  string
