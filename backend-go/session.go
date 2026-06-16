@@ -134,37 +134,79 @@ func (s *Session) sendStatus(state string) {
 	s.send(map[string]any{"type": "status", "state": state})
 }
 
-// Run：连接主循环。读 ws、起 ASR 消费 goroutine。阻塞直到连接关闭。
+// Run：连接主循环。读 ws、惰性建 ASR、阻塞直到连接关闭。
 func (s *Session) Run() {
 	defer s.cancel()
+	defer s.closeASR()
 
-	asr, err := s.makeASR()
-	if err != nil {
-		log.Printf("[session %s] create ASR err: %v", s.sid[:8], err)
-		s.sendStatus("asr_error")
-		return
-	}
-	s.asr = asr
-	defer s.asr.Close()
-
-	go s.consumeASR()
-
+	// ASR 流不在此预建：火山大模型流式 ASR 对"建连后迟迟不发包"会判等包超时（45000081）
+	// 而踢断会话。用户连上后往往要先传简历/取公司简报/做声纹注册，期间并不发音频，
+	// 预建必被踢断。改为惰性：首帧音频到达才建连；连接因空闲被踢后，下一帧音频自动重连。
 	s.sendStatus("ready")
 
 	for {
 		mt, data, err := s.conn.ReadMessage()
 		if err != nil {
-			s.cancel() // 客户端断开：先标记正常结束，再由 defer 关 ASR（避免误报 asr_error）
+			s.cancel() // 客户端断开：标记正常收尾，避免误报 asr_error
 			return
 		}
 		switch mt {
 		case websocket.BinaryMessage:
 			pcm := bytesToPCM(data)
+			pos := s.ring.total() // 此帧在环形缓冲中的绝对起点（写入前）
 			s.ring.write(pcm)
-			s.asr.SendAudio(pcm)
+			s.feedAudio(pcm, pos)
 		case websocket.TextMessage:
 			s.handleControl(data)
 		}
+	}
+}
+
+// feedAudio：把一帧音频喂给 ASR；按需惰性建连 / 断线重连。
+// pos = 该帧在环形缓冲中的绝对起点样本号。每条 ASR 连接的识别时间戳都从 0 计，
+// 用 pos 折算出的 baseMs 还原成会话全局时间戳，保证 handleFinal 按 [start,end]
+// 切环形缓冲时取到正确音频。
+func (s *Session) feedAudio(pcm []int16, pos int64) {
+	s.mu.Lock()
+	asr := s.asr
+	need := asr == nil || s.asrDead
+	backoff := s.asrBackoff
+	s.mu.Unlock()
+
+	if need {
+		if time.Now().Before(backoff) {
+			return // 退避期内丢弃此帧（pos 仍随环形缓冲推进，重连后基准依旧正确）
+		}
+		// volc 为同步拨号：期间本循环阻塞，WS 音频在 TCP 缓冲排队，连上后顺序补发。
+		newASR, err := s.makeASR()
+		if err != nil {
+			log.Printf("[session %s] (re)connect ASR err: %v", s.sid[:8], err)
+			s.mu.Lock()
+			s.asrBackoff = time.Now().Add(1500 * time.Millisecond)
+			s.mu.Unlock()
+			s.sendStatus("asr_error")
+			return
+		}
+		baseMs := msOf(pos, s.cfg.SampleRate)
+		s.mu.Lock()
+		s.asr = newASR
+		s.asrDead = false
+		s.mu.Unlock()
+		go s.consumeASR(newASR, baseMs)
+		asr = newASR
+	}
+
+	asr.SendAudio(pcm)
+}
+
+// closeASR：关闭当前 ASR 流（幂等；惰性建连下可能从未建过）。
+func (s *Session) closeASR() {
+	s.mu.Lock()
+	asr := s.asr
+	s.asr = nil
+	s.mu.Unlock()
+	if asr != nil {
+		asr.Close()
 	}
 }
 
@@ -209,22 +251,33 @@ func (s *Session) handleControl(data []byte) {
 	}
 }
 
-// consumeASR：消费 ASR 事件。partial 直接发；final 起 goroutine 处理。
-func (s *Session) consumeASR() {
-	for ev := range s.asr.Events() {
+// consumeASR：消费一条 ASR 流的事件（baseMs 把连接内相对时间戳还原为会话全局）。
+// partial 直接发；final 起 goroutine 处理。流结束（events 关闭）后标记需重连。
+func (s *Session) consumeASR(asr ASRStream, baseMs int64) {
+	for ev := range asr.Events() {
 		if !ev.Final {
 			s.send(map[string]any{"type": "partial", "text": ev.Text})
 			continue
 		}
+		ev.StartMs += baseMs
+		ev.EndMs += baseMs
 		go s.handleFinal(ev)
 	}
-	// events 关闭即 ASR 流结束。若会话尚未正常收尾（ctx 未取消），说明是上游 ASR
-	// 出错导致流中断（如握手/鉴权/参数被拒），通知前端而非静默卡死。
+	// 该流结束：若仍是当前流，标记 asrDead，下一帧音频触发重连。
+	s.mu.Lock()
+	current := s.asr == asr
+	if current {
+		s.asrDead = true
+	}
+	s.mu.Unlock()
+	if !current {
+		return
+	}
+	// 正常收尾（ctx 取消）静默；否则只记日志——空闲被踢属预期，重连自动、不打扰前端。
 	select {
 	case <-s.ctx.Done():
 	default:
-		log.Printf("[session %s] ASR stream ended unexpectedly", s.sid[:8])
-		s.sendStatus("asr_error")
+		log.Printf("[session %s] ASR stream ended; 下一帧音频将自动重连", s.sid[:8])
 	}
 }
 
