@@ -36,6 +36,7 @@ const done = new Set<number>();
 let connected = false;
 let listening = false;
 let enrolling = false;
+let enrollTimer: number | undefined;
 let answerStreaming = false;
 let currentAnswer = "";
 const history: QAItem[] = [];
@@ -296,6 +297,10 @@ function updateNav() {
 
 function goToStep(step: number) {
   if (step < 1 || step > 4 || !isUnlocked(step)) return;
+  // 录音中离开声纹步骤：自动取消，避免带着 enrolling 进入面试。
+  if (enrolling && currentStep === 3 && step !== 3) {
+    cancelEnroll("已退出声纹注册。");
+  }
   currentStep = step;
   panels.forEach((p) =>
     p.classList.toggle("active", Number(p.dataset.step) === step),
@@ -440,7 +445,31 @@ btnSaveCtx.onclick = () => {
 };
 
 // ---------- 第三步：声纹注册 ----------
+function clearEnrollTimeout() {
+  if (enrollTimer !== undefined) {
+    clearTimeout(enrollTimer);
+    enrollTimer = undefined;
+  }
+}
+
+// 停止/取消注册：解除本地录音态并通知服务端解除武装，
+// 避免服务端一直 enrolling、把后续第一句真问题当成声纹样本吃掉。
+function cancelEnroll(msg: string, isErr = false) {
+  clearEnrollTimeout();
+  enrolling = false;
+  btnEnroll.classList.remove("recording");
+  ws?.send({ type: "enroll_cancel" });
+  enrollNote.className = isErr ? "enroll-note err" : "enroll-note";
+  enrollNote.textContent = msg;
+  setStatus("已停止", "off");
+}
+
 btnEnroll.onclick = async () => {
+  // 录音中再次点击 = 停止（解决“录音不可停止”）。
+  if (enrolling) {
+    cancelEnroll("已停止录音，可重新点击注册。");
+    return;
+  }
   if (!ws || !ws.connected) {
     enrollNote.className = "enroll-note err";
     enrollNote.textContent = "未连接服务器，请先返回第一步连接。";
@@ -454,9 +483,16 @@ btnEnroll.onclick = async () => {
     btnEnroll.classList.remove("ok");
     btnEnroll.classList.add("recording");
     enrollNote.className = "enroll-note";
-    enrollNote.textContent = "录音中：请正常说一句话…";
+    enrollNote.textContent = "录音中：请正常说一句话…（再次点击可停止）";
     setStatus("声纹注册中…", "on");
+    // 安全超时：ASR 迟迟不出句尾时自动停止，避免永远卡在录音态。
+    clearEnrollTimeout();
+    enrollTimer = window.setTimeout(() => {
+      if (enrolling)
+        cancelEnroll("未检测到完整语音，请在安静环境下说一句话后重试。", true);
+    }, 12000);
   } catch (e) {
+    enrolling = false;
     enrollNote.className = "enroll-note err";
     enrollNote.textContent = "麦克风初始化失败：" + (e as Error).message;
   }
@@ -548,6 +584,7 @@ function handleMsg(m: ServerMsg) {
       pushHistory(questionEl.textContent || "", currentAnswer);
       break;
     case "enrolled":
+      clearEnrollTimeout();
       enrolling = false;
       btnEnroll.classList.remove("recording");
       if (m.ok) {

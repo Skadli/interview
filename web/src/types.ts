@@ -27,6 +27,7 @@ export type ServerMsg =
 export type ClientMsg =
   | { type: "set_mode"; mode: Mode }
   | { type: "enroll_start" }
+  | { type: "enroll_cancel" }
   | { type: "set_context"; resume_text: string; company_text: string }
   | { type: "regenerate" };
 

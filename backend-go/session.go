@@ -176,6 +176,12 @@ func (s *Session) handleControl(data []byte) {
 		s.enrolling = true
 		s.mu.Unlock()
 		s.sendStatus("enrolling")
+	case "enroll_cancel":
+		// 客户端主动停止/超时：解除武装，避免后续第一句真问题被当成声纹样本吃掉。
+		s.mu.Lock()
+		s.enrolling = false
+		s.mu.Unlock()
+		s.sendStatus("enroll_cancelled")
 	case "set_context":
 		s.mu.Lock()
 		s.resumeText = m.ResumeText

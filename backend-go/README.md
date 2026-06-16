@@ -86,6 +86,7 @@ go run .
 - 文本 JSON 控制：
   - `{"type":"set_mode","mode":"conversation"|"structured"}`
   - `{"type":"enroll_start"}`
+  - `{"type":"enroll_cancel"}` — 停止/取消声纹注册（客户端主动或超时），清服务端 `enrolling` 标志
   - `{"type":"set_context","resume_text":"...","company_text":"..."}`
   - `{"type":"regenerate"}`
 
