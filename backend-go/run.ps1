@@ -19,8 +19,13 @@ go mod tidy
 if ($Real) {
     Write-Host "== 真实模式：火山 ASR + 豆包 LLM ==" -ForegroundColor Cyan
     # 必填（也可在外部 shell 提前 export）：
-    if (-not $env:VOLC_APP_KEY)    { $env:VOLC_APP_KEY    = "<你的火山 APP KEY>" }
-    if (-not $env:VOLC_ACCESS_KEY) { $env:VOLC_ACCESS_KEY = "<你的火山 ACCESS KEY>" }
+    # 火山语音鉴权（二选一）：
+    #   新版统一鉴权（推荐，大模型 sauc 端点）：单个 VOLC_API_KEY -> 头 X-Api-Key
+    #   旧版两段式：VOLC_APP_KEY + VOLC_ACCESS_KEY -> 头 X-Api-App-Key / X-Api-Access-Key
+    # 代码里 VOLC_API_KEY 非空时优先走新版；否则回退两段式。
+    if (-not $env:VOLC_API_KEY -and -not $env:VOLC_APP_KEY) {
+        $env:VOLC_API_KEY = "<你的火山语音 API KEY (X-Api-Key)>"
+    }
     if (-not $env:ARK_API_KEY)     { $env:ARK_API_KEY     = "<你的方舟 API KEY>" }
     $env:ASR_PROVIDER = "volc"
     $env:LLM_PROVIDER = "ark"

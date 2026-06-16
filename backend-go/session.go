@@ -144,6 +144,7 @@ func (s *Session) Run() {
 	for {
 		mt, data, err := s.conn.ReadMessage()
 		if err != nil {
+			s.cancel() // 客户端断开：先标记正常结束，再由 defer 关 ASR（避免误报 asr_error）
 			return
 		}
 		switch mt {
@@ -200,6 +201,14 @@ func (s *Session) consumeASR() {
 			continue
 		}
 		go s.handleFinal(ev)
+	}
+	// events 关闭即 ASR 流结束。若会话尚未正常收尾（ctx 未取消），说明是上游 ASR
+	// 出错导致流中断（如握手/鉴权/参数被拒），通知前端而非静默卡死。
+	select {
+	case <-s.ctx.Done():
+	default:
+		log.Printf("[session %s] ASR stream ended unexpectedly", s.sid[:8])
+		s.sendStatus("asr_error")
 	}
 }
 

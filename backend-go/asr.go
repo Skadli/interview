@@ -192,9 +192,10 @@ type VolcASR struct {
 	conn   *websocket.Conn
 	events chan ASREvent
 
-	mu     sync.Mutex
-	seq    int32
-	closed bool
+	mu        sync.Mutex
+	seq       int32
+	closed    bool
+	closeOnce sync.Once // 保证 events 只关一次
 
 	lastEndMs int64 // 已发过 final 的最大 end_time，避免重复
 }
@@ -359,14 +360,7 @@ type volcResp struct {
 }
 
 func (v *VolcASR) readLoop() {
-	defer func() {
-		v.mu.Lock()
-		closed := v.closed
-		v.mu.Unlock()
-		if !closed {
-			close(v.events)
-		}
-	}()
+	defer v.teardown()
 
 	for {
 		_, data, err := v.conn.ReadMessage()
@@ -376,67 +370,97 @@ func (v *VolcASR) readLoop() {
 			v.mu.Unlock()
 			if !closed {
 				log.Printf("[volc-asr] read err: %v", err)
-				close(v.events)
-				v.mu.Lock()
-				v.closed = true
-				v.mu.Unlock()
 			}
 			return
 		}
-		v.handleFrame(data)
+		if fatal := v.handleFrame(data); fatal {
+			return
+		}
 	}
 }
 
-func (v *VolcASR) handleFrame(data []byte) {
+// teardown：幂等收尾。标记 closed（让后续 SendAudio 静默丢弃，避免写错误刷屏）、
+// 关连接、关 events（仅一次，让 session 的 consumeASR 退出）。
+func (v *VolcASR) teardown() {
+	v.mu.Lock()
+	v.closed = true
+	v.mu.Unlock()
+	_ = v.conn.Close()
+	v.closeOnce.Do(func() { close(v.events) })
+}
+
+// handleFrame 处理一帧服务端消息；返回 true 表示遇到致命错误、应终止读循环。
+func (v *VolcASR) handleFrame(data []byte) bool {
 	if len(data) < 4 {
-		return
+		return false
 	}
-	msgType := data[0] >> 4 // 头第二个 nibble 是头长；msgType 在 byte1
-	_ = msgType
 	b1 := data[1]
 	mt := b1 >> 4
 	flags := b1 & 0x0f
-	b2 := data[2]
-	comp := b2 & 0x0f
-
-	off := 4
-	// 标志位 & 0x01：带序列号
-	if flags&0x01 != 0 {
-		if len(data) < off+4 {
-			return
-		}
-		off += 4
-	}
-	// 标志位 & 0x04：带 event（防御性跳过）
-	if flags&0x04 != 0 {
-		if len(data) < off+4 {
-			return
-		}
-		off += 4
-	}
+	comp := data[2] & 0x0f
 
 	switch mt {
 	case msgServerError:
-		// 读错误码 + payload，记录日志
-		log.Printf("[volc-asr] server error frame (flags=%#x)", flags)
-		return
+		// 解析真实错误码与消息（而非只记 flags），并终止流：服务端报错通常是终态，
+		// 继续读只会对每个被拒的包刷屏同一行日志。
+		code, msg := decodeServerError(data, comp)
+		log.Printf("[volc-asr] server error: code=%d msg=%q (resource_id=%s model=%s)",
+			code, msg, v.cfg.VolcResourceID, v.cfg.VolcASRModel)
+		return true
+
 	case msgServerFull:
+		off := 4
+		if flags&0x01 != 0 { // 带序列号
+			if len(data) < off+4 {
+				return false
+			}
+			off += 4
+		}
+		if flags&0x04 != 0 { // 带 event（防御性跳过）
+			if len(data) < off+4 {
+				return false
+			}
+			off += 4
+		}
 		if len(data) < off+4 {
-			return
+			return false
 		}
 		size := binary.BigEndian.Uint32(data[off : off+4])
 		off += 4
 		if len(data) < off+int(size) {
-			return
+			return false
 		}
 		payload := data[off : off+int(size)]
 		if comp == compGZIP {
 			payload = gunzip(payload)
 		}
 		v.parseResult(payload)
-	default:
-		// 其他类型忽略
 	}
+	return false
+}
+
+// decodeServerError 解析服务端错误帧：4字节头之后是 错误码(uint32 大端) +
+// 消息长度(uint32 大端) + 消息体。错误帧不带序列号；消息体按压缩位可能为 gzip。
+func decodeServerError(data []byte, comp byte) (uint32, string) {
+	p := 4
+	var code uint32
+	if len(data) >= p+4 {
+		code = binary.BigEndian.Uint32(data[p : p+4])
+		p += 4
+	}
+	if len(data) < p+4 {
+		return code, ""
+	}
+	size := binary.BigEndian.Uint32(data[p : p+4])
+	p += 4
+	if size == 0 || len(data) < p+int(size) {
+		return code, ""
+	}
+	msg := data[p : p+int(size)]
+	if comp == compGZIP {
+		msg = gunzip(msg)
+	}
+	return code, string(msg)
 }
 
 func (v *VolcASR) parseResult(payload []byte) {

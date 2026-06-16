@@ -147,8 +147,12 @@ func TestPipelineMock(t *testing.T) {
 // 验证 buildPrompt 注入简历/公司文本
 func TestBuildPromptContext(t *testing.T) {
 	sys, usr := buildPrompt("conversation", "请自我介绍", "我做过推荐系统", "字节跳动")
-	if usr != "请自我介绍" {
-		t.Errorf("user mismatch: %q", usr)
+	// user 应包含原始问题，并明确标注为"面试官的提问"、要求以求职者身份作答
+	if !strings.Contains(usr, "请自我介绍") {
+		t.Errorf("user missing question: %q", usr)
+	}
+	if !strings.Contains(usr, "面试官") || !strings.Contains(usr, "求职者") {
+		t.Errorf("user missing interviewer/candidate framing: %q", usr)
 	}
 	if !strings.Contains(sys, "我做过推荐系统") || !strings.Contains(sys, "字节跳动") {
 		t.Errorf("context not injected: %q", sys)
